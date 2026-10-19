@@ -45,6 +45,15 @@ const en = {
   help: "Need help? Open an issue and attach the log: {url}",
   log_saved: "Log saved to {path} (no passwords in it).",
   press_enter: "Press Enter to close.",
+  need_ssid: "Which Wi-Fi should the robot join? Run again with --ssid \"<name>\".",
+  need_password:
+    "The Wi-Fi password is needed. Run again with --saved-password, or set VACDECK_WIFI_PASSWORD.",
+  saved_password_used: "Using the password this computer saved for “{ssid}”.",
+  saved_password_missing: "This computer has no saved password for “{ssid}” (or access was refused).",
+  resuming: "The robot already paired in the last run; continuing from there.",
+  report_pending:
+    "The robot paired, but VacDeck has not seen it come online yet. Run the same command again to keep waiting.",
+  already_added: "This robot is already in VacDeck. Go back to the VacDeck page.",
 };
 
 const vi = {
@@ -89,6 +98,13 @@ const vi = {
   help: "Cần trợ giúp? Gửi báo lỗi kèm tệp log tại: {url}",
   log_saved: "Đã lưu log ở {path} (không chứa mật khẩu).",
   press_enter: "Nhấn Enter để đóng.",
+  need_ssid: "Robot cần vào WiFi nào? Chạy lại với --ssid \"<tên>\".",
+  need_password: "Cần mật khẩu WiFi. Chạy lại với --saved-password, hoặc đặt VACDECK_WIFI_PASSWORD.",
+  saved_password_used: "Dùng mật khẩu máy này đã lưu cho “{ssid}”.",
+  saved_password_missing: "Máy này không có mật khẩu đã lưu cho “{ssid}” (hoặc bị từ chối quyền đọc).",
+  resuming: "Robot đã ghép ở lần chạy trước; chạy tiếp từ đó.",
+  report_pending: "Robot đã ghép nhưng VacDeck chưa thấy robot online. Chạy lại đúng lệnh cũ để chờ tiếp.",
+  already_added: "Robot đã có trong VacDeck. Quay lại trang VacDeck.",
 };
 
 const ru = {
@@ -134,6 +150,15 @@ const ru = {
   help: "Нужна помощь? Создайте обращение и приложите журнал: {url}",
   log_saved: "Журнал сохранён: {path} (паролей в нём нет).",
   press_enter: "Нажмите Enter, чтобы закрыть.",
+  need_ssid: "К какому Wi-Fi подключить робота? Запустите снова с --ssid \"<имя>\".",
+  need_password:
+    "Нужен пароль Wi-Fi. Запустите снова с --saved-password или задайте VACDECK_WIFI_PASSWORD.",
+  saved_password_used: "Используем пароль, сохранённый на этом компьютере для «{ssid}».",
+  saved_password_missing: "На этом компьютере нет сохранённого пароля для «{ssid}» (или доступ запрещён).",
+  resuming: "Робот уже подключён в прошлый раз; продолжаем с этого места.",
+  report_pending:
+    "Робот подключён, но VacDeck ещё не видит его в сети. Запустите ту же команду снова, чтобы подождать.",
+  already_added: "Робот уже есть в VacDeck. Вернитесь на страницу VacDeck.",
 };
 
 const tables = { en, vi, ru };

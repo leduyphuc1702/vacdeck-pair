@@ -60,15 +60,31 @@ Your maps stay on the robot. Pairing again with the same VacDeck account keeps t
 | Robot refused the Wi-Fi settings | Check the Wi-Fi name and password; the robot only supports 2.4 GHz. |
 | Robot paired but VacDeck does not show it | Wait a minute, then press **Sync** in VacDeck. |
 
+## Let an AI agent do it
+
+On the VacDeck page choose **Add a robot → Ask an AI agent**, copy the prompt, and paste it into an
+AI agent that can run commands on your computer (Claude Code, Codex, Cursor, Gemini CLI…). The
+agent asks you everything first, then runs the program once; you only press the robot's button.
+How the agent should drive the program: [AGENTS.md](AGENTS.md).
+
 ## Options
 
 ```
-vacdeck-pair [CODE] [--ssid NAME] [--manual] [--lang en|vi|ru] [--log FILE]
+vacdeck-pair [CODE] [--ssid NAME] [--saved-password] [--manual] [--json] [--max-minutes N]
+             [--lang en|vi|ru] [--log FILE]
 ```
 
-- `--manual` — do not switch Wi-Fi automatically; you join the robot's hotspot yourself.
 - `--ssid` — Wi-Fi for the robot (otherwise asked; Enter keeps the current network).
-- Password can also come from the `VACDECK_WIFI_PASSWORD` environment variable.
+- `--saved-password` — use the password this computer saved for that Wi-Fi (your system may ask
+  you to allow it). The password can also come from the `VACDECK_WIFI_PASSWORD` environment variable.
+- `--manual` — do not switch Wi-Fi automatically; you join the robot's hotspot yourself.
+- `--json` — for AI agents and scripts: never waits for the keyboard, prints one JSON line per step,
+  the last line is the result (see [AGENTS.md](AGENTS.md)).
+- `--max-minutes N` — stop after N minutes. If the robot already paired, running the same command
+  again continues where it stopped.
+
+Exit codes: 0 done · 1 pairing failed · 2 not a code · 3 code unknown/used or VacDeck unreachable ·
+4 paired but not added · 5 Wi-Fi name or password needed · 6 paired, run again to finish.
 
 ## Develop
 
@@ -79,7 +95,8 @@ node src/cli.mjs CODE --robot-host 127.0.0.1 --robot-port 44322 --api http://loc
 sh scripts/build.sh                 # single-file programs in dist/ (needs Bun)
 ```
 
-Releases are built by GitHub Actions when a `v*` tag is pushed.
+Release: bump `VERSION` in `src/main.mjs`, `npm test`, `sh scripts/build.sh`, then
+`gh release create vX.Y.Z dist/*`. (A GitHub Actions version of this is in `ci/release.yml`.)
 
 ---
 
@@ -99,6 +116,10 @@ Chạy trên máy tính có WiFi, đặt gần robot.
 6. Chương trình tự nối vào WiFi của robot; nếu không được, hãy tự nối máy vào WiFi tên bắt đầu
    bằng `dreame-`, `mova-` hoặc `trouver-` (không mật khẩu).
 7. Robot vào lại WiFi nhà và hiện trong VacDeck.
+
+**Nhờ AI agent làm giúp:** trên VacDeck chọn **Thêm robot → Nhờ AI agent**, sao chép prompt và dán
+vào AI agent chạy được lệnh trên máy tính (Claude Code, Codex, Cursor, Gemini CLI…). Agent hỏi bạn
+mọi thứ trước rồi tự chạy chương trình; bạn chỉ cần giữ nút trên robot. Chi tiết: [AGENTS.md](AGENTS.md).
 
 Mật khẩu WiFi chỉ gửi tới robot (mã hoá), VacDeck không nhận. Gặp lỗi:
 [gửi báo lỗi](https://github.com/leduyphuc1702/vacdeck-pair/issues/new/choose) kèm tệp
@@ -120,6 +141,10 @@ VacDeck. Запускайте на компьютере с Wi-Fi рядом с �
 6. Программа сама подключится к Wi-Fi робота; если нет — подключитесь вручную к сети,
    имя которой начинается с `dreame-`, `mova-` или `trouver-` (без пароля).
 7. Робот вернётся в домашнюю сеть и появится в VacDeck.
+
+**Через ИИ-агента:** в VacDeck выберите **Добавить робота → Попросить ИИ-агента**, скопируйте промпт
+и вставьте его в агента, который умеет запускать команды на компьютере (Claude Code, Codex, Cursor,
+Gemini CLI…). Агент сначала всё спросит, затем сам запустит программу. Подробно: [AGENTS.md](AGENTS.md).
 
 Пароль Wi-Fi передаётся только роботу (в зашифрованном виде), VacDeck его не получает. Проблемы:
 [создайте обращение](https://github.com/leduyphuc1702/vacdeck-pair/issues/new/choose) и приложите

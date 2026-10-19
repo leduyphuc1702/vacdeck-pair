@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
 import { main, normalizeCode, parseArgs } from "../src/main.mjs";
 import { languages, messageKeys, tables } from "../src/messages.mjs";
@@ -126,8 +129,7 @@ describe("helpers", () => {
   });
 });
 
-describe("whole run against a stand-in VacDeck and robot", () => {
-  async function fakeVacdeck(reportStatuses) {
+async function fakeVacdeck(reportStatuses, configStatus = 200) {
     const calls = [];
     const server = createServer((request, response) => {
       let body = "";
@@ -141,6 +143,7 @@ describe("whole run against a stand-in VacDeck and robot", () => {
           response.end(JSON.stringify(data));
         };
         if (request.method === "GET" && request.url === "/v1/pair-agent/K7QM4-XZP2A") {
+          if (configStatus !== 200) return send(configStatus, { error: {} });
           return send(200, {
             uid: SETTINGS.uid,
             region: SETTINGS.region,
@@ -158,8 +161,9 @@ describe("whole run against a stand-in VacDeck and robot", () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     closers.push(() => server.close());
     return { url: `http://127.0.0.1:${server.address().port}`, calls };
-  }
+}
 
+describe("whole run against a stand-in VacDeck and robot", () => {
   it("pairs, retries while the robot comes online, then reports the id", async () => {
     const fake = await robot();
     const vacdeck = await fakeVacdeck([409]);
@@ -222,5 +226,121 @@ describe("whole run against a stand-in VacDeck and robot", () => {
     const vacdeck = await fakeVacdeck([]);
     const code = await main(["ZZZZZ-ZZZZZ", "--api", vacdeck.url, "--yes", "--lang", "en", "--log", LOG]);
     assert.equal(code, 3);
+  });
+});
+
+describe("--json, as an AI agent runs it (no terminal)", () => {
+  const CLI = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
+  const STATE = join(tmpdir(), "vacdeck-pair-test-state.json");
+
+  /** Runs the real program in a child process with no keyboard and no password in the environment. */
+  function runCli(args) {
+    const env = { ...process.env };
+    delete env.VACDECK_WIFI_PASSWORD;
+    return new Promise((resolve) => {
+      const child = execFile(
+        process.execPath,
+        [CLI, ...args, "--json", "--lang", "en", "--log", LOG, "--state", STATE],
+        { env, timeout: 30_000 },
+        (_error, stdout) => {
+          const events = stdout
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+          resolve({ code: child.exitCode, events, result: events.at(-1), stdout });
+        },
+      );
+      child.stdin.end();
+    });
+  }
+
+  const robotArgs = (fake, vacdeck) => [
+    "K7QM4-XZP2A",
+    "--api",
+    vacdeck.url,
+    "--robot-host",
+    "127.0.0.1",
+    "--robot-port",
+    String(fake.port),
+    "--retry-ms",
+    "50",
+  ];
+
+  it("prints only JSON lines and ends with a result the agent can act on", async () => {
+    rmSync(STATE, { force: true });
+    const fake = await robot();
+    const vacdeck = await fakeVacdeck([]);
+    const run = await runCli([...robotArgs(fake, vacdeck), "--ssid", "Home 2.4G", "--pass", "pw"]);
+    assert.equal(run.code, 0);
+    assert.deepEqual(
+      run.events.filter((e) => e.event === "step").map((e) => e.step),
+      ["check_code", "send_settings", "report"],
+    );
+    assert.equal(run.result.event, "result");
+    assert.equal(run.result.ok, true);
+    assert.equal(run.result.name, "Kitchen robot");
+    assert.equal(run.result.next, null);
+    assert.ok(!run.stdout.includes('"pw"'));
+    assert.ok(!existsSync(STATE));
+  });
+
+  it("missing password: exits at once with next = ask_password, robot untouched", async () => {
+    const fake = await robot();
+    const vacdeck = await fakeVacdeck([]);
+    const run = await runCli([...robotArgs(fake, vacdeck), "--ssid", "Home 2.4G"]);
+    assert.equal(run.code, 5);
+    assert.equal(run.result.ok, false);
+    assert.equal(run.result.next, "ask_password");
+    assert.equal(fake.received.length, 0);
+  });
+
+  it("out of time after pairing: run again continues reporting without the robot or the password", async () => {
+    rmSync(STATE, { force: true });
+    const fake = await robot();
+    const statuses = Array(500).fill(409);
+    const vacdeck = await fakeVacdeck(statuses);
+    const first = await runCli([
+      ...robotArgs(fake, vacdeck),
+      "--ssid",
+      "Home 2.4G",
+      "--pass",
+      "secret-pass",
+      "--max-minutes",
+      "0.01",
+    ]);
+    assert.equal(first.code, 6);
+    assert.equal(first.result.next, "run_again");
+    const saved = readFileSync(STATE, "utf8");
+    assert.equal(JSON.parse(saved).did, "123456789");
+    assert.ok(!saved.includes("secret-pass"));
+
+    statuses.length = 0;
+    const second = await runCli(robotArgs(fake, vacdeck));
+    assert.equal(second.code, 0);
+    assert.ok(second.events.some((e) => e.step === "resume"));
+    assert.equal(fake.received.length, 1);
+    assert.ok(!existsSync(STATE));
+  });
+
+  it("code already used by the interrupted run counts as done", async () => {
+    rmSync(STATE, { force: true });
+    const fake = await robot();
+    const statuses = Array(500).fill(409);
+    const vacdeck = await fakeVacdeck(statuses);
+    await runCli([...robotArgs(fake, vacdeck), "--ssid", "x", "--pass", "y", "--max-minutes", "0.01"]);
+    const used = await fakeVacdeck([], 410);
+    const run = await runCli(robotArgs(fake, used));
+    assert.equal(run.code, 0);
+    assert.equal(run.result.ok, true);
+    assert.ok(!existsSync(STATE));
+  });
+
+  it("a code another run used is a new_code failure", async () => {
+    rmSync(STATE, { force: true });
+    const used = await fakeVacdeck([], 410);
+    const run = await runCli(["K7QM4-XZP2A", "--api", used.url]);
+    assert.equal(run.code, 3);
+    assert.equal(run.result.next, "new_code");
   });
 });

@@ -2,7 +2,7 @@
 // falls back to asking the person to switch networks by hand, which always works.
 
 import { execFile } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +85,30 @@ async function winRejoin(ssid) {
   return ok;
 }
 
+/** The exported profile XML is the same in every Windows language, unlike `show profile` text. */
+async function winSavedPassword(ssid) {
+  const folder = mkdtempSync(join(tmpdir(), "vacdeck-wifi-"));
+  try {
+    await run(NETSH, ["wlan", "export", "profile", `name=${ssid}`, "key=clear", `folder=${folder}`]);
+    for (const file of readdirSync(folder)) {
+      const key = readFileSync(join(folder, file), "utf8").match(/<keyMaterial>([^<]*)<\/keyMaterial>/);
+      if (key) return unescapeXml(key[1]);
+    }
+    return null;
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+function unescapeXml(s) {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 /* ----------------------------------- macOS ---------------------------------- */
 
 async function macInterface() {
@@ -126,6 +150,16 @@ async function macJoin(ssid, password) {
   return ok && !/could not|failed|error/i.test(out);
 }
 
+/** macOS shows its own approval dialog; the person has two minutes to answer it. */
+async function macSavedPassword(ssid) {
+  const { ok, out } = await run(
+    "security",
+    ["find-generic-password", "-D", "AirPort network password", "-a", ssid, "-w"],
+    120_000,
+  );
+  return ok ? out.replace(/\n$/, "") : null;
+}
+
 /* ----------------------------------- Linux ---------------------------------- */
 
 async function linuxCurrent() {
@@ -152,16 +186,40 @@ async function linuxRejoin(ssid) {
   return ok;
 }
 
+/** Needs root or a polkit rule that lets this user read secrets; otherwise nmcli prints nothing. */
+async function linuxSavedPassword(ssid) {
+  const { ok, out } = await run("nmcli", [
+    "-s",
+    "-g",
+    "802-11-wireless-security.psk",
+    "connection",
+    "show",
+    "id",
+    ssid,
+  ]);
+  const value = out.replace(/\n$/, "").replace(/\\:/g, ":").replace(/\\\\/g, "\\");
+  return ok && value ? value : null;
+}
+
 /* --------------------------------------------------------------------------- */
 
 const none = async () => null;
 const nothing = async () => [];
 const fail = async () => false;
 
-/** The helpers for this computer. `password` is only used by macOS to rejoin a network. */
+/**
+ * The helpers for this computer. `password` is only used by macOS to rejoin a network.
+ * `savedPassword` reads the password this computer stored for a network, or null.
+ */
 export function wifiFor(platform = process.platform) {
   if (platform === "win32") {
-    return { current: winCurrent, scan: winScan, join: winJoin, rejoin: winRejoin };
+    return {
+      current: winCurrent,
+      scan: winScan,
+      join: winJoin,
+      rejoin: winRejoin,
+      savedPassword: winSavedPassword,
+    };
   }
   if (platform === "darwin") {
     return {
@@ -169,10 +227,17 @@ export function wifiFor(platform = process.platform) {
       scan: macScan,
       join: (ssid) => macJoin(ssid),
       rejoin: (ssid, password) => macJoin(ssid, password),
+      savedPassword: macSavedPassword,
     };
   }
   if (platform === "linux") {
-    return { current: linuxCurrent, scan: linuxScan, join: linuxJoin, rejoin: linuxRejoin };
+    return {
+      current: linuxCurrent,
+      scan: linuxScan,
+      join: linuxJoin,
+      rejoin: linuxRejoin,
+      savedPassword: linuxSavedPassword,
+    };
   }
-  return { current: none, scan: nothing, join: fail, rejoin: fail };
+  return { current: none, scan: nothing, join: fail, rejoin: fail, savedPassword: none };
 }
