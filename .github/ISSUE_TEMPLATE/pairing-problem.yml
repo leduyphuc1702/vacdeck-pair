@@ -1,0 +1,52 @@
+name: Pairing problem
+description: The tool could not add your robot to VacDeck.
+labels: ["pairing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **do not paste your Wi-Fi password** or your VacDeck pairing code.
+        The log file (`vacdeck-pair.log` in your home folder) never contains the password.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Computer
+      options: [Windows 11, Windows 10, macOS (Apple silicon), macOS (Intel), Linux, Other]
+    validations:
+      required: true
+  - type: input
+    id: robot
+    attributes:
+      label: Robot brand and model
+      description: As printed on the label under the robot, e.g. "Dreame L10s Ultra" or "MOVA P10".
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where did it stop?
+      options:
+        - The code was not accepted
+        - The robot's hotspot was never found
+        - The computer could not join the robot's hotspot
+        - The robot did not answer
+        - The robot refused the Wi-Fi settings
+        - The robot paired but VacDeck did not show it
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: hotspot
+    attributes:
+      label: Name of the robot's hotspot
+      description: The Wi-Fi name the robot showed in pairing mode (starts with dreame-, mova- or trouver-), if you saw it.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Drag `vacdeck-pair.log` here, or paste its content.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: VacDeck support (account, billing, robot control)
+    url: https://vacdeck.com
+    about: Questions that are not about this pairing tool.

@@ -1,0 +1,16 @@
+{
+  "name": "vacdeck-pair",
+  "version": "0.1.0",
+  "description": "Add a Dreame, MOVA or Trouver robot vacuum to VacDeck through the robot's pairing hotspot.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "vacdeck-pair": "src/cli.mjs" },
+  "files": ["src"],
+  "engines": { "node": ">=18.17" },
+  "scripts": {
+    "start": "node src/cli.mjs",
+    "test": "node --test test/pair.test.mjs",
+    "fake-robot": "node test/fake-robot.mjs",
+    "build": "sh scripts/build.sh"
+  }
+}
