@@ -1,6 +1,6 @@
 {
   "name": "vacdeck-pair",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Add a Dreame, MOVA or Trouver robot vacuum to VacDeck through the robot's pairing hotspot.",
   "license": "MIT",
   "type": "module",

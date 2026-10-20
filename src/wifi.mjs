@@ -32,13 +32,41 @@ export function pickHotspot(names) {
 }
 
 /** Our address on the robot's hotspot, or null when not joined yet. */
-export function hotspotAddress() {
-  for (const list of Object.values(networkInterfaces())) {
+export function hotspotAddress(interfaces = networkInterfaces()) {
+  return usableAddresses(interfaces).find((address) => HOTSPOT_SUBNET.test(address)) ?? null;
+}
+
+/** IPv4 addresses a network handed out to this computer (no loopback, no 169.254 self-assigned). */
+export function usableAddresses(interfaces = networkInterfaces()) {
+  const found = [];
+  for (const list of Object.values(interfaces)) {
     for (const entry of list ?? []) {
-      if (entry.family === "IPv4" && HOTSPOT_SUBNET.test(entry.address)) return entry.address;
+      const ipv4 = entry.family === "IPv4" || entry.family === 4;
+      if (ipv4 && !entry.internal && !entry.address.startsWith("169.254.")) {
+        found.push(entry.address);
+      }
     }
   }
-  return null;
+  return found;
+}
+
+/**
+ * Where the robot may be once the computer is on its hotspot. Most robots sit at 192.168.5.1, some
+ * elsewhere (a Dreame S50 hands out 192.168.1.x), and the robot is always the hotspot's gateway.
+ */
+export function candidateHosts({ gateways = [], addresses = usableAddresses(), standard }) {
+  const sameNet = addresses.map((address) => address.replace(/\.\d+$/, ".1"));
+  return [...new Set([standard, ...gateways, ...sameNet])].filter(
+    (host) => host && !addresses.includes(host),
+  );
+}
+
+/** `route print -4 0.0.0.0` lists gateways in digits whatever the Windows language is. */
+export function parseWindowsGateways(out) {
+  return out
+    .split(/\r?\n/)
+    .map((l) => l.match(/^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)\s/)?.[1])
+    .filter(Boolean);
 }
 
 /* ---------------------------------- Windows --------------------------------- */
@@ -78,6 +106,11 @@ async function winJoin(ssid) {
   await run(NETSH, ["wlan", "add", "profile", `filename=${file}`, "user=current"]);
   const { ok } = await run(NETSH, ["wlan", "connect", `name=${ssid}`, `ssid=${ssid}`]);
   return ok;
+}
+
+async function winGateways() {
+  const { out } = await run("route", ["print", "-4", "0.0.0.0"]);
+  return parseWindowsGateways(out);
 }
 
 async function winRejoin(ssid) {
@@ -151,6 +184,12 @@ async function macJoin(ssid, password) {
 }
 
 /** macOS shows its own approval dialog; the person has two minutes to answer it. */
+async function macGateways() {
+  const { out } = await run("route", ["-n", "get", "default"]);
+  const match = out.match(/gateway:\s*(\d+\.\d+\.\d+\.\d+)/);
+  return match ? [match[1]] : [];
+}
+
 async function macSavedPassword(ssid) {
   const { ok, out } = await run(
     "security",
@@ -179,6 +218,11 @@ async function linuxScan() {
 async function linuxJoin(ssid) {
   const { ok } = await run("nmcli", ["dev", "wifi", "connect", ssid], 40_000);
   return ok;
+}
+
+async function linuxGateways() {
+  const { out } = await run("ip", ["-4", "route", "show", "default"]);
+  return [...out.matchAll(/default via (\d+\.\d+\.\d+\.\d+)/g)].map((m) => m[1]);
 }
 
 async function linuxRejoin(ssid) {
@@ -218,6 +262,7 @@ export function wifiFor(platform = process.platform) {
       scan: winScan,
       join: winJoin,
       rejoin: winRejoin,
+      gateways: winGateways,
       savedPassword: winSavedPassword,
     };
   }
@@ -227,6 +272,7 @@ export function wifiFor(platform = process.platform) {
       scan: macScan,
       join: (ssid) => macJoin(ssid),
       rejoin: (ssid, password) => macJoin(ssid, password),
+      gateways: macGateways,
       savedPassword: macSavedPassword,
     };
   }
@@ -236,8 +282,16 @@ export function wifiFor(platform = process.platform) {
       scan: linuxScan,
       join: linuxJoin,
       rejoin: linuxRejoin,
+      gateways: linuxGateways,
       savedPassword: linuxSavedPassword,
     };
   }
-  return { current: none, scan: nothing, join: fail, rejoin: fail, savedPassword: none };
+  return {
+    current: none,
+    scan: nothing,
+    join: fail,
+    rejoin: fail,
+    gateways: nothing,
+    savedPassword: none,
+  };
 }

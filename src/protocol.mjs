@@ -76,13 +76,18 @@ export function decryptRouter({ value, did, privateKey, clientKey }) {
 }
 
 /**
- * Runs the exchange. Resolves `{ ok: true, did }` once the robot accepted the settings, or
+ * Runs the exchange. Resolves `{ ok: true, did, host }` once the robot accepted the settings, or
  * `{ ok: false, error, did? }` with error one of `no_response`, `pincode_required`,
  * `router_rejected`, `other`. `log` receives one line per step; the Wi-Fi password never appears.
+ *
+ * Robots do not all use the same address on their hotspot, so `hosts` (a list, or a function
+ * read again on every try while the address is still being handed out) are all asked; only the
+ * public key goes to them. The settings go to the one that answered.
  */
 export function pairOverHotspot({
   settings,
   host = ROBOT_HOST,
+  hosts = [host],
   port = ROBOT_PORT,
   localPort = ROBOT_PORT,
   log = () => {},
@@ -108,12 +113,22 @@ export function pairOverHotspot({
       resolve(result);
     };
 
+    let robotHost = null;
+    const targets = () => {
+      if (robotHost) return [robotHost];
+      const list = typeof hosts === "function" ? hosts() : hosts;
+      return [...new Set(list)];
+    };
+
     const send = (payload, label) => {
-      socket.send(payload, port, host, (error) => {
-        // Before the hotspot hands out an address there is no route yet: the next try will do.
-        if (error) log(`send ${label}: ${error.message}`);
-      });
-      log(`-> ${label} (try ${tries})`);
+      const to = targets();
+      for (const address of to) {
+        socket.send(payload, port, address, (error) => {
+          // Before the hotspot hands out an address there is no route yet: the next try will do.
+          if (error) log(`send ${label} ${address}: ${error.message}`);
+        });
+      }
+      log(`-> ${label} ${to.join(",")} (try ${tries})`);
     };
 
     const repeat = (payload, label, failure) => {
@@ -127,7 +142,7 @@ export function pairOverHotspot({
       }, RETRY_MS);
     };
 
-    const onMessage = (raw) => {
+    const onMessage = (raw, from) => {
       let message;
       try {
         message = JSON.parse(raw.toString("utf8"));
@@ -146,6 +161,8 @@ export function pairOverHotspot({
         const id = message.did === undefined || message.did === null ? "" : String(message.did);
         if (!id) return finish({ ok: false, error: "other" });
         did = id;
+        robotHost = from?.address ?? null;
+        log(`robot answered from ${robotHost ?? "?"}`);
         const robotKey =
           typeof message.value === "string" && message.value.length > 0
             ? Buffer.from(message.value, "base64")
@@ -157,7 +174,9 @@ export function pairOverHotspot({
       }
 
       if (message.method === "response_router" && did) {
-        finish(code === "0" ? { ok: true, did } : { ok: false, error: "router_rejected", did });
+        finish(
+          code === "0" ? { ok: true, did, host: robotHost } : { ok: false, error: "router_rejected", did },
+        );
       }
     };
 

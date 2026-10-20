@@ -17,9 +17,16 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pickLanguage, translator } from "./messages.mjs";
 import { pairOverHotspot, ROBOT_HOST, ROBOT_PORT } from "./protocol.mjs";
-import { HOTSPOT_PATTERN, hotspotAddress, pickHotspot, wifiFor } from "./wifi.mjs";
+import {
+  candidateHosts,
+  HOTSPOT_PATTERN,
+  hotspotAddress,
+  pickHotspot,
+  usableAddresses,
+  wifiFor,
+} from "./wifi.mjs";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.2.1";
 const DEFAULT_API = "https://app.vacdeck.com";
 const ISSUES_URL = "https://github.com/leduyphuc1702/vacdeck-pair/issues/new/choose";
 const SEARCH_MINUTES = 10;
@@ -399,6 +406,19 @@ export async function main(argv = process.argv.slice(2)) {
     const testing = hotspotHost !== ROBOT_HOST;
     let joinedBy = null;
 
+    // On the robot's hotspot = the usual robot address, or this computer reports the robot's
+    // network name and that network handed out an address (robots differ in their address range).
+    const onHotspot = async () => {
+      if (hotspotAddress()) return true;
+      const now = await wifi.current().catch(() => null);
+      return Boolean(now && pickHotspot([now]) && usableAddresses().length > 0);
+    };
+    const describeNetwork = async () => {
+      const now = await wifi.current().catch(() => null);
+      const kind = now ? (pickHotspot([now]) ? "robot hotspot" : "other network") : "unknown";
+      return `wifi ${kind}; addresses ${usableAddresses().join(",") || "none"}`;
+    };
+
     if (!testing) {
       step("robot_mode");
       say("");
@@ -410,7 +430,7 @@ export async function main(argv = process.argv.slice(2)) {
       );
       say(t("searching", { min: Math.round((searchEnd - Date.now()) / 60_000) }));
       let announcedManual = false;
-      while (Date.now() < searchEnd && !hotspotAddress()) {
+      while (Date.now() < searchEnd && !(await onHotspot())) {
         if (!args.manual) {
           const names = await wifi.scan().catch(() => []);
           const hotspot = pickHotspot(names);
@@ -421,8 +441,13 @@ export async function main(argv = process.argv.slice(2)) {
             const ok = await wifi.join(hotspot).catch(() => false);
             log(`join result ${ok}`);
             joinedBy = hotspot;
-            for (let i = 0; i < 30 && !hotspotAddress(); i++) await sleep(1000);
-            if (hotspotAddress()) break;
+            let joined = false;
+            for (let i = 0; i < 30 && !joined; i++) {
+              await sleep(1000);
+              joined = await onHotspot();
+            }
+            if (joined) break;
+            log(await describeNetwork());
             say(t("not_joined"));
           }
         }
@@ -433,16 +458,21 @@ export async function main(argv = process.argv.slice(2)) {
         }
         await sleep(4000);
       }
-      const address = hotspotAddress();
-      log(`hotspot address ${address ?? "none"}`);
-      if (!address) return fail(joinedBy ? "hotspot_join_failed" : "hotspot_not_found", api);
+      const joined = await onHotspot();
+      log(`hotspot ${joined ? "joined" : "not joined"}; ${await describeNetwork()}`);
+      if (!joined) return fail(joinedBy ? "hotspot_join_failed" : "hotspot_not_found", api);
     }
+
+    const gateways = testing ? [] : await wifi.gateways().catch(() => []);
+    if (!testing) log(`gateways ${gateways.join(",") || "none"}`);
 
     step("send_settings");
     say(t("joined"));
     const result = await pairOverHotspot({
       settings,
-      host: hotspotHost,
+      hosts: testing
+        ? [hotspotHost]
+        : () => candidateHosts({ gateways, standard: ROBOT_HOST }),
       port: Number(args["robot-port"] ?? ROBOT_PORT),
       localPort: testing ? 0 : ROBOT_PORT,
       log,
@@ -463,7 +493,7 @@ export async function main(argv = process.argv.slice(2)) {
         await sleep(5000);
         const now = await wifi.current().catch(() => null);
         log(`rejoin ${attempt + 1} ${ok} ${now === back ? "on network" : "not yet"}`);
-        if (now === back || (now && !hotspotAddress())) break;
+        if (now === back || (now && !pickHotspot([now]))) break;
       }
     }
 

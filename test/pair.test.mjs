@@ -9,7 +9,12 @@ import { after, describe, it } from "node:test";
 import { main, normalizeCode, parseArgs } from "../src/main.mjs";
 import { languages, messageKeys, tables } from "../src/messages.mjs";
 import { pairOverHotspot } from "../src/protocol.mjs";
-import { pickHotspot } from "../src/wifi.mjs";
+import {
+  candidateHosts,
+  parseWindowsGateways,
+  pickHotspot,
+  usableAddresses,
+} from "../src/wifi.mjs";
 import { startFakeRobot } from "./fake-robot.mjs";
 
 const SETTINGS = {
@@ -40,7 +45,7 @@ describe("protocol", () => {
       port: fake.port,
       localPort: 0,
     });
-    assert.deepEqual(result, { ok: true, did: "123456789" });
+    assert.deepEqual(result, { ok: true, did: "123456789", host: "127.0.0.1" });
     const { timestamp, ...rest } = fake.received[0];
     assert.match(timestamp, /^\d{10}$/);
     assert.deepEqual(rest, {
@@ -94,6 +99,23 @@ describe("protocol", () => {
     assert.ok(lines.length > 2);
     assert.ok(!lines.join("\n").includes("secret-pass"));
   });
+
+  it("asks every possible robot address and sends the settings only to the one that answered", async () => {
+    const fake = await robot();
+    const lines = [];
+    const result = await pairOverHotspot({
+      settings: SETTINGS,
+      hosts: () => ["127.0.0.2", "127.0.0.1"],
+      port: fake.port,
+      localPort: 0,
+      log: (line) => lines.push(line),
+    });
+    assert.deepEqual(result, { ok: true, did: "123456789", host: "127.0.0.1" });
+    assert.equal(fake.received.length, 1);
+    const routerLines = lines.filter((line) => line.startsWith("-> config_router"));
+    assert.ok(routerLines.length > 0);
+    assert.ok(routerLines.every((line) => line.startsWith("-> config_router 127.0.0.1 ")));
+  });
 });
 
 describe("helpers", () => {
@@ -120,6 +142,34 @@ describe("helpers", () => {
     );
     assert.equal(pickHotspot(["Home", "MOVA-vacuum-x"]), "MOVA-vacuum-x");
     assert.equal(pickHotspot(["Home", "Dreamers"]), null);
+  });
+
+  it("finds the robot on hotspots outside 192.168.5.x", () => {
+    // A Dreame S50 hotspot seen from a Russian Windows: 192.168.1.241, gateway 192.168.1.1.
+    const route = [
+      "IPv4 таблица маршрута",
+      "===========================================================================",
+      "Активные маршруты:",
+      "Сетевой адрес           Маска сети      Адрес шлюза       Интерфейс  Метрика",
+      "          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.241     35",
+    ].join("\r\n");
+    const gateways = parseWindowsGateways(route);
+    assert.deepEqual(gateways, ["192.168.1.1"]);
+    assert.deepEqual(
+      candidateHosts({ gateways, addresses: ["192.168.1.241"], standard: "192.168.5.1" }),
+      ["192.168.5.1", "192.168.1.1"],
+    );
+    assert.deepEqual(
+      usableAddresses({
+        lo: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+        eth: [{ family: "IPv4", address: "169.254.3.4", internal: false }],
+        wifi: [
+          { family: "IPv6", address: "fe80::1", internal: false },
+          { family: "IPv4", address: "192.168.1.241", internal: false },
+        ],
+      }),
+      ["192.168.1.241"],
+    );
   });
 
   it("every language has every message", () => {
